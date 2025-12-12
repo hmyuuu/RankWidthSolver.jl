@@ -1,6 +1,6 @@
 name = "RankWidthSolver"
 uuid = "211beeaa-8dfe-42af-805a-8be62ccfa100"
-version = "DEV-1.0.0"
+version = "1.0.0-DEV"
 authors = ["Huai-Ming Yu<hmyuus@gmail.com>"]
 
 [deps]

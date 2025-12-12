@@ -9,7 +9,8 @@ We expose a caching implementation for small-n exact algorithms.
 
 Creates a cut-rank oracle with memoization.
 For `n ≤ 64` we memoize results using a `UInt64` subset mask key.
-For `n > 64` we still support cut-rank queries, but do not memoize by default.
+For `n > 64` we still support cut-rank queries (via bitpacked multiword masks),
+but do not memoize by default.
 """
 mutable struct CutRankOracle
     g::BitAdjGraph
@@ -18,6 +19,48 @@ end
 
 CutRankOracle(g::BitAdjGraph) = CutRankOracle(g, nvertices(g) <= 64 ? Dict{UInt64, Int}() : nothing)
 
+@inline function _mask_u64_from_vertices(vertices::AbstractVector{Int}, n::Int)::UInt64
+    mask = UInt64(0)
+    @inbounds for v in vertices
+        (1 <= v <= n) || throw(ArgumentError("vertex out of range: $v (expected 1..$n)"))
+        mask |= (UInt64(1) << (v - 1))
+    end
+    return mask
+end
+
+@inline function _mask_words_from_vertices(vertices::AbstractVector{Int}, n::Int)::Vector{UInt64}
+    nwords = (n + 63) >>> 6
+    mask = zeros(UInt64, nwords)
+    @inbounds for v in vertices
+        (1 <= v <= n) || throw(ArgumentError("vertex out of range: $v (expected 1..$n)"))
+        _setbit!(mask, v)
+    end
+    return mask
+end
+
+@inline function _mask_u64_from_bits(bits::AbstractVector{Bool}, n::Int)::UInt64
+    length(bits) == n || throw(ArgumentError("mask length mismatch: expected $n, got $(length(bits))"))
+    mask = UInt64(0)
+    @inbounds for i in 1:n
+        if bits[i]
+            mask |= (UInt64(1) << (i - 1))
+        end
+    end
+    return mask
+end
+
+@inline function _mask_words_from_bits(bits::AbstractVector{Bool}, n::Int)::Vector{UInt64}
+    length(bits) == n || throw(ArgumentError("mask length mismatch: expected $n, got $(length(bits))"))
+    nwords = (n + 63) >>> 6
+    mask = zeros(UInt64, nwords)
+    @inbounds for i in 1:n
+        if bits[i]
+            _setbit!(mask, i)
+        end
+    end
+    return mask
+end
+
 """
     cut_rank(oracle::CutRankOracle, A::UInt64) -> Int
 
@@ -25,7 +68,10 @@ Compute ρ(A) where bit i (1-based) of `A` indicates vertex i is in subset A.
 """
 function cut_rank(oracle::CutRankOracle, A::UInt64)::Int
     n = nvertices(oracle.g)
-    n <= 64 || throw(ArgumentError("cut_rank(UInt64 mask) only supports n ≤ 64 (got n=$n)"))
+    n <= 64 || throw(ArgumentError(
+        "cut_rank(::UInt64) requires n ≤ 64 (got n=$n). " *
+        "For n > 64 pass a multiword mask (Vector{UInt64}) or a BitVector/Vector{Bool}."
+    ))
 
     fullmask = n == 64 ? typemax(UInt64) : (UInt64(1) << n) - 1
     A &= fullmask
@@ -42,7 +88,7 @@ function cut_rank(oracle::CutRankOracle, A::UInt64)::Int
     for v in 1:n
         if ((A >>> (v - 1)) & 0x1) == 1
             # neighbors of v into B side
-            neigh = oracle.g.adj[v][1]
+            @inbounds neigh = oracle.g.adj[v][1]  # n≤64 => nwords==1
             push!(rows, UInt64[(neigh & B)])
         end
     end
@@ -53,6 +99,38 @@ function cut_rank(oracle::CutRankOracle, A::UInt64)::Int
         oracle.cache_u64[key] = r
     end
     return r
+end
+
+"""
+    cut_rank(oracle::CutRankOracle, bits::AbstractVector{Bool}) -> Int
+
+Compute ρ(A) from a boolean indicator vector of length `nvertices(oracle.g)`.
+
+- For `n ≤ 64` this uses the memoized `UInt64` fast path.
+- For `n > 64` this packs into a multiword mask and uses the generic path.
+"""
+function cut_rank(oracle::CutRankOracle, bits::AbstractVector{Bool})::Int
+    n = nvertices(oracle.g)
+    if n <= 64
+        return cut_rank(oracle, _mask_u64_from_bits(bits, n))
+    end
+    return cut_rank(oracle, _mask_words_from_bits(bits, n))
+end
+
+"""
+    cut_rank(oracle::CutRankOracle, vertices::AbstractVector{Int}) -> Int
+
+Compute ρ(A) where `vertices` lists the vertices in subset A.
+
+- For `n ≤ 64` this uses the memoized `UInt64` fast path.
+- For `n > 64` this packs into a multiword mask and uses the generic path.
+"""
+function cut_rank(oracle::CutRankOracle, vertices::AbstractVector{Int})::Int
+    n = nvertices(oracle.g)
+    if n <= 64
+        return cut_rank(oracle, _mask_u64_from_vertices(vertices, n))
+    end
+    return cut_rank(oracle, _mask_words_from_vertices(vertices, n))
 end
 
 """

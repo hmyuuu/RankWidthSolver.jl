@@ -1,0 +1,39 @@
+name: CompatHelper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  CompatHelper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - uses: julia-actions/cache@v2
+
+      - name: Install CompatHelper
+        shell: julia --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.add("CompatHelper")
+
+      - name: Run CompatHelper
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: if you use SSH deploy keys (e.g. Documenter), set DOCUMENTER_KEY in repo secrets.
+          COMPATHELPER_PRIV: ${{ secrets.DOCUMENTER_KEY }}
+        shell: julia --color=yes {0}
+        run: |
+          using CompatHelper
+          CompatHelper.main()
+
+

@@ -20,3 +20,4 @@ src/*.jl~
 *.dylib
 *.exe
 *.out
+Manifest.toml
