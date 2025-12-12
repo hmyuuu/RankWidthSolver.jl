@@ -22,16 +22,6 @@ optcode = optimize_code(code, size_dict, opt)
 @show contraction_complexity(optcode, size_dict)
 ```
 
-### Complete graph benchmark
-
-Run:
-
-```bash
-julia --project=. examples/complete_graph_benchmark.jl
-```
-
-For complete graphs `Kₙ` with `n≥2`, rank-width is `1` because every non-trivial cut yields an all-ones biadjacency matrix of GF(2)-rank 1.
-
 ## Installation
 
 <p>
