@@ -2,7 +2,7 @@
 
 RankWidthSolver is a Julia package that computes **rank-width** (via the **cut-rank function** over GF(2)) and uses it to build contraction orders for tensor networks, integrating as an optimizer for `OMEinsumContractionOrders.jl`.
 
-References: [Rank-width (Wikipedia)](https://en.wikipedia.org/wiki/Rank-width), [Oum survey (arXiv:1601.03800)](https://arxiv.org/pdf/1601.03800)
+References:  [Oum survey (arXiv:1601.03800)](https://arxiv.org/pdf/1601.03800)
 
 ## Usage
 
