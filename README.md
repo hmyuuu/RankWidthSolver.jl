@@ -16,8 +16,7 @@ code = ein"ij,jk,kl->il"
 size_dict = uniformsize(code, 2)
 
 # exact (small-n) rank-width DP optimizer
-opt = RankWidthSolver.OMEinsumIntegration.ExactRankWidth(max_n=20)
-optcode = optimize_code(code, size_dict, opt)
+optcode = optimize_code(code, size_dict, ExactRankWidth())
 
 @show contraction_complexity(optcode, size_dict)
 ```
