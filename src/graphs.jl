@@ -40,10 +40,3 @@ end
 Returns the bitset row (a view/copy) for neighbors of vertex v.
 """
 @inline neighbors_mask(g::BitAdjGraph, v::Int) = g.adj[v]
-
-@inline function _setbit!(row::Vector{UInt64}, idx::Int)
-    w = (idx - 1) >>> 6 + 1
-    b = (idx - 1) & 63
-    @inbounds row[w] |= (UInt64(1) << b)
-    return nothing
-end

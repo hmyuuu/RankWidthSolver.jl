@@ -13,11 +13,14 @@ export DecompNode, build_decomposition, leaves_mask
 export elimination_order
 export ExactRankWidth, ApproxRankWidth, ExactLinearRankWidth
 
+include("utils.jl")
+
 include("gf2.jl")
 include("graphs.jl")
 include("cut_rank.jl")
 include("rankwidth.jl")
 include("rank_decomposition.jl")
+include("heuristics.jl")
 include("contraction_order.jl")
 include("omeinsum_optimizer.jl")
 
