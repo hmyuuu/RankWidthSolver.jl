@@ -12,6 +12,7 @@ export exact_rankwidth, exact_linear_rankwidth
 export DecompNode, build_decomposition, leaves_mask
 export elimination_order
 export ExactRankWidth, ApproxRankWidth, ExactLinearRankWidth
+export caterpillar_to_path
 
 include("gf2.jl")
 include("graphs.jl")

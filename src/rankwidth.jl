@@ -85,7 +85,7 @@ function exact_rankwidth(g::BitAdjGraph; max_n::Int = 20)::ExactRankWidthResult
 end
 
 """
-    exact_linear_rankwidth(g::BitAdjGraph; max_n::Int=20) -> ExactLinearRankWidthResult
+    exact_linear_rankwidth(g::BitAdjGraph; max_n::Int=20, last_vertex::Union{Nothing, Int}=nothing) -> ExactLinearRankWidthResult
 
 Compute exact **linear rank-width** for `n ≤ 64` using subset DP in `O(n 2^n)`.
 
@@ -94,8 +94,10 @@ Linear rank-width is the minimum, over all vertex orderings π, of:
     max_{i=1..n-1} ρ({π₁, …, πᵢ})
 
 where ρ(A) is the cut-rank over GF(2) of the cut (A, V\\A).
+
+If `last_vertex` is provided, the ordering is constrained to end with that vertex.
 """
-function exact_linear_rankwidth(g::BitAdjGraph; max_n::Int = 20)::ExactLinearRankWidthResult
+function exact_linear_rankwidth(g::BitAdjGraph; max_n::Int = 20, last_vertex::Union{Nothing, Int} = nothing)::ExactLinearRankWidthResult
     n = nvertices(g)
     n <= 64 || throw(ArgumentError("exact_linear_rankwidth currently supports n ≤ 64 (got n=$n)"))
     n <= max_n || throw(ArgumentError("n=$n exceeds max_n=$max_n for exact DP"))
@@ -109,21 +111,43 @@ function exact_linear_rankwidth(g::BitAdjGraph; max_n::Int = 20)::ExactLinearRan
 
     for k in 1:n
         for S in _subsets_of_size(n, k)
+            # If last_vertex is constrained, it must only appear at the very end (step n).
+            # So if k < n and S contains last_vertex, this S is invalid as a prefix.
+            if last_vertex !== nothing && k < n
+                if ((S >>> (last_vertex - 1)) & 0x1) == 1
+                    continue
+                end
+            end
+
             rS = cut_rank(oracle, S)
             best = typemax(Int)
             bestv = 1
             # pick the last vertex added to obtain S
             for v in 1:n
                 ((S >>> (v - 1)) & 0x1) == 0 && continue
+                
+                # If constrained, at step n, v must be last_vertex
+                if last_vertex !== nothing && k == n && v != last_vertex
+                    continue
+                end
+
                 prev = S & ~(UInt64(1) << (v - 1))
+                # dp[prev] might be missing if prev was skipped (should not happen if logic is correct)
+                # If prev was skipped, it means prev was invalid, so S via v is invalid.
+                if !haskey(dp, prev)
+                    continue
+                end
+                
                 val = max(dp[prev], rS)
                 if val < best
                     best = val
                     bestv = v
                 end
             end
-            dp[S] = best
-            choice_last[S] = bestv
+            if best != typemax(Int)
+                dp[S] = best
+                choice_last[S] = bestv
+            end
         end
     end
 

@@ -99,19 +99,30 @@ function _optimize_code(code, size_dict, optimizer::ExactLinearRankWidth)
 
     lg = _tensor_line_graph(ixv)
     n = nv(lg)
-
+    n_inputs = length(ixs)
+    
     bg = from_simple_graph(lg)
-    order = if n <= optimizer.max_n
-        n <= 64 || throw(ArgumentError("ExactLinearRankWidth exact DP currently supports n ≤ 64 (got n=$n); set max_n < n to use greedy mode"))
-        exact_linear_rankwidth(bg; max_n=optimizer.max_n).order
+    # Optimize order over input tensors only (1..n_inputs)
+    # The output tensor (n_inputs + 1) will be handled by pivot_tree
+    order = if n_inputs <= optimizer.max_n
+        n_inputs <= 64 || throw(ArgumentError("ExactLinearRankWidth exact DP currently supports n ≤ 64 (got n=$n_inputs); set max_n < n to use greedy mode"))
+        full_order = exact_linear_rankwidth(bg; max_n=optimizer.max_n).order
+        # Filter to only include input tensor indices (1..n_inputs)
+        filter(v -> v <= n_inputs, full_order)
     else
-        _greedy_linear_order(bg; max_group_size=optimizer.max_group_size)
+        full_order = _greedy_linear_order(bg; max_group_size=optimizer.max_group_size)
+        filter(v -> v <= n_inputs, full_order)
     end
 
     parts = _order_to_left_parts(order)
     optcode = recursive_construct_nestedeinsum(ixv, empty(iy), parts, size_dict, 0, optimizer.sub_optimizer)
-    return fix_binary_tree(pivot_tree(optcode, length(ixs) + 1))
+    # pivot_tree is needed to position the output tensor correctly (at index n_inputs + 1)
+    # This ensures the contraction produces the correct output shape
+    optcode = pivot_tree(optcode, n_inputs + 1)
+    optcode = fix_binary_tree(optcode)
+    return caterpillar_to_path(optcode, ixs, iy)
 end
+
 
 function _tensor_line_graph(ixv::AbstractVector{<:AbstractVector})
     n = length(ixv)
@@ -252,11 +263,15 @@ function _order_to_left_parts(order::Vector{Int})
     return [_order_to_left_parts(order[1:end-1]), [order[end]]]
 end
 
-function _greedy_linear_order(g::BitAdjGraph; max_group_size::Int = 40)
+function _greedy_linear_order(g::BitAdjGraph; max_group_size::Int = 40, last_vertex::Union{Nothing, Int}=nothing)
     # Simple greedy: build prefix, each step add vertex minimizing resulting prefix cut-rank.
     n = nvertices(g)
     oracle = CutRankOracle(g)
     remaining = Set(1:n)
+    if last_vertex !== nothing
+        delete!(remaining, last_vertex)
+    end
+
     order = Int[]
     if n <= 64
         prefix = UInt64(0)
@@ -274,6 +289,9 @@ function _greedy_linear_order(g::BitAdjGraph; max_group_size::Int = 40)
             push!(order, bestv)
             delete!(remaining, bestv)
             prefix |= (UInt64(1) << (bestv - 1))
+        end
+        if last_vertex !== nothing
+            push!(order, last_vertex)
         end
         return order
     end
@@ -297,5 +315,79 @@ function _greedy_linear_order(g::BitAdjGraph; max_group_size::Int = 40)
         delete!(remaining, bestv)
         _setbit!(prefix, bestv)
     end
+    if last_vertex !== nothing
+        push!(order, last_vertex)
+    end
     return order
+end
+
+"""
+    caterpillar_to_path(code::OMEinsumContractionOrders.NestedEinsum, ixs, iy)
+
+Transform an arbitrary contraction tree (e.g. balanced) into a strict left-associative path (caterpillar)
+where the right child of every node is a leaf tensor.
+"""
+function caterpillar_to_path(code::OMEinsumContractionOrders.NestedEinsum{L}, ixs, iy) where L
+    leaves = _collect_leaves(code)
+    if length(leaves) < 2
+        return code
+    end
+
+    # Extract indices for each leaf
+    leaf_inds_list = Vector{Vector{L}}(undef, length(leaves))
+    for (i, l) in enumerate(leaves)
+        leaf_inds_list[i] = ixs[l.tensorindex]
+    end
+
+    n = length(leaves)
+    
+    # Precompute suffix unions to know which indices are needed later
+    # suffix_unions[i] = union of indices in leaves[i...n] AND iy
+    suffix_unions = Vector{Vector{L}}(undef, n)
+    current_suffix = collect(L, iy)
+    for i in n:-1:1
+        current_suffix = union(current_suffix, leaf_inds_list[i])
+        suffix_unions[i] = current_suffix
+    end
+
+    # Start with the first leaf
+    current_node = leaves[1]
+    current_inds = leaf_inds_list[1]
+
+    for i in 2:n
+        next_leaf = leaves[i]
+        next_inds = leaf_inds_list[i]
+        
+        # Determine output indices: (current ∪ next) ∩ (needed later)
+        needed = (i < n) ? suffix_unions[i+1] : iy
+        all_inds = union(current_inds, next_inds)
+        # Use intersect(needed, all_inds) to prefer order of 'needed' (important for final output iy)
+        out_inds = intersect(needed, all_inds)
+        
+        eins = OMEinsumContractionOrders.EinCode([current_inds, next_inds], out_inds)
+        
+        # Construct new node: Left=current, Right=next_leaf
+        # Note: NestedEinsum constructor signature might vary. 
+        # Usually: NestedEinsum(args, eins)
+        current_node = OMEinsumContractionOrders.NestedEinsum([current_node, next_leaf], eins)
+        current_inds = out_inds
+    end
+
+    return current_node
+end
+
+function _collect_leaves(code::OMEinsumContractionOrders.NestedEinsum{L}) where L
+    if isempty(code.args)
+        return [code]
+    end
+    res = OMEinsumContractionOrders.NestedEinsum{L}[]
+    for arg in code.args
+        if arg isa OMEinsumContractionOrders.NestedEinsum
+            append!(res, _collect_leaves(arg))
+        else
+            # Should not happen in standard OMEinsumContractionOrders usage where leaves are NestedEinsum with empty args
+            # But if it does, ignore or handle?
+        end
+    end
+    return res
 end

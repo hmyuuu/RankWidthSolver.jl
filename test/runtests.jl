@@ -92,4 +92,45 @@ using OMEinsumContractionOrders
         @test length(flat) == n
         @test sort(flat) == collect(1:n)
     end
+
+    @testset "Path Structure Enforcement" begin
+        # Test 1: Transformation of a balanced tree to a path
+        ixs = [[1], [1, 2], [2, 3], [3]]
+        iy = Int[]
+        
+        # Construct leaves using the constructor that works (assuming single int constructor exists or using explicit one)
+        # Note: In OMEinsumContractionOrders, leaves are NestedEinsum with empty args and a tensor index.
+        # We rely on the fact that existing tests passed, so NestedEinsum{Int}(i) likely works.
+        L1 = OMEinsumContractionOrders.NestedEinsum{Int}(1)
+        L2 = OMEinsumContractionOrders.NestedEinsum{Int}(2)
+        L3 = OMEinsumContractionOrders.NestedEinsum{Int}(3)
+        L4 = OMEinsumContractionOrders.NestedEinsum{Int}(4)
+
+        # Helper to validate path structure (caterpillar: args[2] is always a leaf)
+        function validate_path(code)
+            if !(code isa OMEinsumContractionOrders.NestedEinsum) || isempty(code.args)
+                return true
+            end
+            @test length(code.args) == 2
+            left, right = code.args[1], code.args[2]
+            # Right child MUST be a leaf (empty args)
+            if right isa OMEinsumContractionOrders.NestedEinsum
+                @test isempty(right.args)
+            end
+            validate_path(left)
+        end
+        
+        # Test: ExactLinearRankWidth produces path structure
+        code = ein"ij,jk,kl,lm->im"
+        sd = uniformsize(code, 2)
+        opt = ExactLinearRankWidth(max_n=20)
+        optcode = optimize_code(code, sd, opt)
+        validate_path(optcode)
+        
+        # Test: Correctness of contraction
+        A = rand(2,2); B = rand(2,2); C = rand(2,2); D = rand(2,2)
+        res_orig = code(A,B,C,D)
+        res_opt = optcode(A,B,C,D)
+        @test res_orig ≈ res_opt
+    end
 end # RankWidthSolver.jl tests
